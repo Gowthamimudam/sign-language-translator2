@@ -12,6 +12,19 @@ const VIDEO_HEIGHT = 480;
 
 type DetectionMode = "gestures" | "alphabets" | "numbers";
 
+const NUMBER_WORDS: Record<string, string> = {
+  "0": "zero",
+  "1": "one",
+  "2": "two",
+  "3": "three",
+  "4": "four",
+  "5": "five",
+  "6": "six",
+  "7": "seven",
+  "8": "eight",
+  "9": "nine",
+};
+
 export default function DetectionPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [mode, setMode] = useState<DetectionMode>("gestures");
@@ -23,11 +36,12 @@ export default function DetectionPage() {
   const { speak, stopSpeaking } = useTextToSpeech();
   const [speechEnabled, setSpeechEnabled] = useState(true);
   const [history, setHistory] = useState<string[]>([]);
-  const [sentence, setSentence] = useState("");
+  const [tokens, setTokens] = useState<string[]>([]);
+  const [currentWord, setCurrentWord] = useState("");
 
   const lastTokenRef = useRef<string | null>(null);
   const lastAppendTimeRef = useRef(0);
-  const APPEND_COOLDOWN_MS = 1500;
+  const APPEND_COOLDOWN_MS = 6000;
 
   // Map raw gesture name to token shown/appended based on mode
   const getTokenForCurrentMode = useCallback(
@@ -48,6 +62,8 @@ export default function DetectionPage() {
     [mode]
   );
 
+  const sentence = [...tokens, currentWord].filter(Boolean).join(" ");
+
   // Detection → sentence builder + speech + history
   useEffect(() => {
     if (!gesture || gesture.gesture === "Unknown" || gesture.confidence <= 0.5 || !isRunning) return;
@@ -59,25 +75,47 @@ export default function DetectionPage() {
     const now = Date.now();
     if (token === lastTokenRef.current && now - lastAppendTimeRef.current < APPEND_COOLDOWN_MS) return;
 
-    // Append token to sentence (no automatic spaces; Space button handles that)
-    setSentence((prev) => prev + token);
-
-    // Speak token if enabled
-    if (speechEnabled) {
-      speak(token.split(" / ")[0]);
+    // Sentence builder behavior:
+    // - Alphabets: build up a word (no spaces between letters)
+    // - Numbers: push any currentWord, then push the digit token
+    // - Gestures: push any currentWord, then push the gesture token
+    if (mode === "alphabets") {
+      setCurrentWord((prev) => prev + token);
+    } else if (mode === "numbers") {
+      setTokens((prev) => {
+        const next = [...prev];
+        if (currentWord.trim()) next.push(currentWord.trim());
+        next.push(token);
+        return next;
+      });
+      setCurrentWord("");
+    } else {
+      setTokens((prev) => {
+        const next = [...prev];
+        if (currentWord.trim()) next.push(currentWord.trim());
+        next.push(token);
+        return next;
+      });
+      setCurrentWord("");
     }
 
-    // History of recognized tokens
+    // Speak token if enabled (numbers spoken as words)
+    if (speechEnabled) {
+      const spoken =
+        mode === "numbers" ? (NUMBER_WORDS[token] ?? token) : token.split(" / ")[0];
+      speak(spoken);
+    }
+
+    // History of recognized tokens (show token)
     setHistory((prev) => {
-      const display = token;
       const last = prev[prev.length - 1];
-      if (last === display) return prev;
-      return [...prev.slice(-19), display];
+      if (last === token) return prev;
+      return [...prev.slice(-19), token];
     });
 
     lastTokenRef.current = token;
     lastAppendTimeRef.current = now;
-  }, [gesture, isRunning, getTokenForCurrentMode, speechEnabled, speak]);
+  }, [gesture, isRunning, getTokenForCurrentMode, speechEnabled, speak, mode, currentWord]);
 
   const handleStart = useCallback(async () => {
     if (videoRef.current) {
@@ -95,15 +133,39 @@ export default function DetectionPage() {
   }, [stop, stopSpeaking]);
 
   const addSpace = useCallback(() => {
-    setSentence((prev) => (prev.endsWith(" ") || prev.length === 0 ? prev : prev + " "));
+    setTokens((prev) => {
+      const next = [...prev];
+      const w = currentWord.trim();
+      if (w) next.push(w);
+      return next;
+    });
+    setCurrentWord("");
   }, []);
 
   const clearSentence = useCallback(() => {
-    setSentence("");
+    setTokens([]);
+    setCurrentWord("");
     setHistory([]);
     lastTokenRef.current = null;
     lastAppendTimeRef.current = 0;
   }, []);
+
+  const deleteLast = useCallback(() => {
+    setHistory((prev) => prev.slice(0, -1));
+    lastTokenRef.current = null;
+    lastAppendTimeRef.current = 0;
+
+    setCurrentWord((w) => {
+      if (w.length > 0) return w.slice(0, -1);
+      return w;
+    });
+
+    setTokens((prev) => {
+      // If we have an in-progress word, deleting it is handled above.
+      if (currentWord.length > 0) return prev;
+      return prev.slice(0, -1);
+    });
+  }, [currentWord]);
 
   const currentModeLabel =
     mode === "gestures" ? "Gestures" : mode === "alphabets" ? "Alphabets" : "Numbers";
@@ -195,9 +257,14 @@ export default function DetectionPage() {
                   {sentence ? sentence : <span className="text-muted-foreground">Start signing to build a sentence...</span>}
                 </p>
                 <div className="mt-2 flex justify-end">
-                  <Button size="xs" variant="outline" className="h-6 px-2 text-[11px]" onClick={clearSentence}>
-                    Clear Sentence
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={deleteLast} disabled={!sentence}>
+                      Delete Last
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={clearSentence} disabled={!sentence}>
+                      Clear Sentence
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>

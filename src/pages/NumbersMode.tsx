@@ -31,6 +31,7 @@ import type { Landmark } from "@/lib/gestureClassifier";
 import { getEmojiForToken } from "@/lib/emojiMapping";
 import { getVoice, saveVoice } from "@/lib/voiceStore";
 import { extractHandLandmarksFromImage } from "@/lib/gestureDetection";
+import { GestureImageGrid } from "@/components/GestureImageGrid";
 import { toast } from "sonner";
 
 const VIDEO_WIDTH = 640;
@@ -214,9 +215,12 @@ function NumbersTrain() {
   const [trainedNumbers, setTrainedNumbers] = useState<Set<string>>(new Set());
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [uploadedImageBlob, setUploadedImageBlob] = useState<Blob | null>(null);
+  const [numGestures, setNumGestures] = useState<StoredGesture[]>([]);
 
   useEffect(() => {
-    getAllGestures().then((gestures) => {
+    const load = async () => {
+      const gestures = await getAllGestures();
       const trained = new Set<string>();
       gestures.forEach((g) => {
         if (g.name.startsWith("num_")) {
@@ -224,7 +228,11 @@ function NumbersTrain() {
         }
       });
       setTrainedNumbers(trained);
-    });
+      setNumGestures(gestures.filter((g) => g.name.startsWith("num_")));
+    };
+    void load();
+    const interval = setInterval(() => void load(), 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleStart = useCallback(async () => {
@@ -243,6 +251,7 @@ function NumbersTrain() {
   const resetCapture = useCallback(() => {
     setCapturePhase("idle");
     setSamples([]);
+    setUploadedImageBlob(null);
   }, []);
 
   const selectNumber = useCallback((num: string) => {
@@ -272,6 +281,7 @@ function NumbersTrain() {
     async (file: File | null) => {
       if (!file || !selectedNumber) return;
       setIsImageUploading(true);
+      setUploadedImageBlob(file);
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       const previewUrl = URL.createObjectURL(file);
       setImagePreviewUrl(previewUrl);
@@ -308,6 +318,7 @@ function NumbersTrain() {
       emoji: selectedNumber,
       hand: "right" as HandType,
       samples,
+      imageBlob: uploadedImageBlob ?? undefined,
       createdAt: Date.now(),
     };
     await saveGesture(gesture);
@@ -315,7 +326,7 @@ function NumbersTrain() {
     setCapturePhase("idle");
     setSamples([]);
     toast.success(`Number "${selectedNumber}" trained successfully!`);
-  }, [selectedNumber, samples]);
+  }, [selectedNumber, samples, uploadedImageBlob]);
 
   const handleDeleteNumber = useCallback(async (num: string) => {
     const all = await getAllGestures();
@@ -548,16 +559,13 @@ function NumbersTrain() {
               </div>
             </div>
           )}
-
-          {selectedNumber && (
-            <div className="mt-4">
-              <h4 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-1">
-                Voice for "{selectedNumber}"
-              </h4>
-              <NumberVoiceControls token={selectedNumber} />
-            </div>
-          )}
         </div>
+
+        <GestureImageGrid
+          gestures={numGestures}
+          title="Numbers Learning Section"
+          getLabel={(g) => g.name.replace("num_", "")}
+        />
       </div>
     </div>
   );
@@ -582,7 +590,7 @@ function NumbersDetect() {
   const lastAddedTimeRef = useRef(0);
 
   const STABLE_FRAMES = 15;
-  const ADD_COOLDOWN = 2000;
+  const ADD_COOLDOWN = 6000;
 
   useEffect(() => {
     const load = async () => {

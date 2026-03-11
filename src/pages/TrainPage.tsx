@@ -11,6 +11,7 @@ import {
   Mic,
   MicOff,
   AlertTriangle,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ import {
 import { saveVoice } from "@/lib/voiceStore";
 import type { Landmark } from "@/lib/gestureClassifier";
 import { toast } from "sonner";
+import { GestureImageGrid } from "@/components/GestureImageGrid";
 
 const VIDEO_WIDTH = 640;
 const VIDEO_HEIGHT = 480;
@@ -45,6 +47,8 @@ export default function TrainPage() {
   const [directionWarning, setDirectionWarning] = useState<string | null>(null);
   const [savedGestures, setSavedGestures] = useState<StoredGesture[]>([]);
   const [readyToSave, setReadyToSave] = useState(false);
+  const [trainingImageBlob, setTrainingImageBlob] = useState<Blob | null>(null);
+  const [trainingImageUrl, setTrainingImageUrl] = useState<string | null>(null);
 
   // Voice recording
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -68,6 +72,9 @@ export default function TrainPage() {
     setVoiceBlob(null);
     setDirectionWarning(null);
     setGestureEmoji("");
+    setTrainingImageBlob(null);
+    if (trainingImageUrl) URL.revokeObjectURL(trainingImageUrl);
+    setTrainingImageUrl(null);
   }, []);
 
   const handleStop = useCallback(() => {
@@ -157,6 +164,7 @@ export default function TrainPage() {
       emoji: gestureEmoji.trim() || "👋",
       hand: "both" as HandType,
       samples,
+      imageBlob: trainingImageBlob ?? undefined,
       createdAt: Date.now(),
     };
     await saveGesture(gesture);
@@ -168,13 +176,21 @@ export default function TrainPage() {
     );
     // Redirect to gesture library
     setTimeout(() => navigate("/gestures"), 1200);
-  }, [samples, gestureName, gestureEmoji, voiceBlob, navigate]);
+  }, [samples, gestureName, gestureEmoji, voiceBlob, navigate, trainingImageBlob]);
 
   const handleDelete = useCallback(async (id: string) => {
     await deleteGesture(id);
     setSavedGestures(await getAllGestures());
     toast.success("Gesture deleted");
   }, []);
+
+  const onUploadTrainingImage = useCallback((file: File | null) => {
+    if (!file) return;
+    setTrainingImageBlob(file);
+    if (trainingImageUrl) URL.revokeObjectURL(trainingImageUrl);
+    setTrainingImageUrl(URL.createObjectURL(file));
+    toast.success("Training image attached. It will be saved with the gesture.");
+  }, [trainingImageUrl]);
 
   
 
@@ -394,6 +410,36 @@ export default function TrainPage() {
                       )}
                     </div>
 
+                    {/* Training image */}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground font-mono">
+                        Upload image (optional):
+                      </span>
+                      <input
+                        id="custom-train-image"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => onUploadTrainingImage(e.target.files?.[0] ?? null)}
+                      />
+                      <Button
+                        size="sm"
+                        variant={trainingImageBlob ? "secondary" : "outline"}
+                        onClick={() => document.getElementById("custom-train-image")?.click()}
+                        className="gap-1.5"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        {trainingImageBlob ? "Change Image" : "Upload Image"}
+                      </Button>
+                      {trainingImageUrl && (
+                        <img
+                          src={trainingImageUrl}
+                          alt="Training gesture preview"
+                          className="h-10 w-10 rounded-md border border-border object-cover"
+                        />
+                      )}
+                    </div>
+
                     <Button onClick={handleSave} className="w-full gap-2">
                       <Save className="h-4 w-4" />
                       Save Gesture to Library
@@ -476,6 +522,12 @@ export default function TrainPage() {
                 </div>
               )}
             </div>
+
+            <GestureImageGrid
+              gestures={savedGestures.filter((g) => !g.name.startsWith("alpha_") && !g.name.startsWith("num_"))}
+              title="Gesture Learning Section"
+              getLabel={(g) => g.name}
+            />
           </div>
         </div>
       </motion.div>

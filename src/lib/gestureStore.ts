@@ -13,11 +13,12 @@ export interface StoredGesture {
   emoji: string; // user-chosen emoji for this gesture
   hand: HandType; // which hand this gesture is for
   samples: Landmark[][]; // each sample is 21 landmarks
+  imageBlob?: Blob; // optional training image for learning
   createdAt: number;
 }
 
 const DB_NAME = "signspeak-gestures";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NAME = "custom_gestures";
 
 function openDB(): Promise<IDBDatabase> {

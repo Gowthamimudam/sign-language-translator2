@@ -31,6 +31,7 @@ import type { Landmark } from "@/lib/gestureClassifier";
 import { getEmojiForToken } from "@/lib/emojiMapping";
 import { getVoice, saveVoice } from "@/lib/voiceStore";
 import { extractHandLandmarksFromImage } from "@/lib/gestureDetection";
+import { GestureImageGrid } from "@/components/GestureImageGrid";
 import { toast } from "sonner";
 
 const VIDEO_WIDTH = 640;
@@ -214,10 +215,13 @@ function AlphabetTrain() {
   const [trainedLetters, setTrainedLetters] = useState<Set<string>>(new Set());
   const [isImageUploading, setIsImageUploading] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [uploadedImageBlob, setUploadedImageBlob] = useState<Blob | null>(null);
+  const [alphaGestures, setAlphaGestures] = useState<StoredGesture[]>([]);
 
   // Load already trained letters
   useEffect(() => {
-    getAllGestures().then((gestures) => {
+    const load = async () => {
+      const gestures = await getAllGestures();
       const trained = new Set<string>();
       gestures.forEach((g) => {
         if (g.name.startsWith("alpha_")) {
@@ -225,7 +229,11 @@ function AlphabetTrain() {
         }
       });
       setTrainedLetters(trained);
-    });
+      setAlphaGestures(gestures.filter((g) => g.name.startsWith("alpha_")));
+    };
+    void load();
+    const interval = setInterval(() => void load(), 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleStart = useCallback(async () => {
@@ -244,6 +252,7 @@ function AlphabetTrain() {
   const resetCapture = useCallback(() => {
     setCapturePhase("idle");
     setSamples([]);
+    setUploadedImageBlob(null);
   }, []);
 
   const selectLetter = useCallback((letter: string) => {
@@ -273,6 +282,7 @@ function AlphabetTrain() {
     async (file: File | null) => {
       if (!file || !selectedLetter) return;
       setIsImageUploading(true);
+      setUploadedImageBlob(file);
       if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
       const previewUrl = URL.createObjectURL(file);
       setImagePreviewUrl(previewUrl);
@@ -309,6 +319,7 @@ function AlphabetTrain() {
       emoji: selectedLetter,
       hand: "right" as HandType,
       samples,
+      imageBlob: uploadedImageBlob ?? undefined,
       createdAt: Date.now(),
     };
     await saveGesture(gesture);
@@ -316,7 +327,7 @@ function AlphabetTrain() {
     setCapturePhase("idle");
     setSamples([]);
     toast.success(`Letter "${selectedLetter}" trained successfully!`);
-  }, [selectedLetter, samples]);
+  }, [selectedLetter, samples, uploadedImageBlob]);
 
   const handleDeleteLetter = useCallback(async (letter: string) => {
     const all = await getAllGestures();
@@ -554,6 +565,12 @@ function AlphabetTrain() {
             </div>
           )}
         </div>
+
+        <GestureImageGrid
+          gestures={alphaGestures}
+          title="Alphabet Learning Section"
+          getLabel={(g) => g.name.replace("alpha_", "")}
+        />
       </div>
     </div>
   );
@@ -578,7 +595,7 @@ function AlphabetDetect() {
   const lastAddedTimeRef = useRef(0);
 
   const STABLE_FRAMES = 15; // Need 15 consecutive frames (~1.5s) to confirm a letter
-  const ADD_COOLDOWN = 2000; // 2s cooldown between adding letters
+  const ADD_COOLDOWN = 6000; // 6s cooldown between adding letters
 
   // Load alphabet gestures
   useEffect(() => {

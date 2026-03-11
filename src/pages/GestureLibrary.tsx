@@ -5,6 +5,7 @@ import { getAllGestures, deleteGesture, saveGesture, exportGestures, importGestu
 import { saveVoice, getVoice, deleteVoice } from "@/lib/voiceStore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GestureImageGrid } from "@/components/GestureImageGrid";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +18,25 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+
+function GestureImageThumb({ blob, label }: { blob?: Blob; label: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!blob) {
+      setUrl(null);
+      return;
+    }
+    const next = URL.createObjectURL(blob);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [blob]);
+  if (!url) return null;
+  return (
+    <div className="mb-3 overflow-hidden rounded-xl border border-border bg-muted">
+      <img src={url} alt={label} className="h-36 w-full object-cover" />
+    </div>
+  );
+}
 
 
 function VoiceRecordButton({ gestureName }: { gestureName: string }) {
@@ -154,6 +174,21 @@ export default function GestureLibrary() {
     setCustomGestures(all.filter((g) => !g.name.startsWith("alpha_") && !g.name.startsWith("num_")));
   }, []);
 
+  const attachGestureImage = useCallback(
+    async (gesture: StoredGesture, file: File | null) => {
+      if (!file) return;
+      if (!file.type.startsWith("image/")) {
+        toast.error("Please upload an image file");
+        return;
+      }
+      const updated: StoredGesture = { ...gesture, imageBlob: file };
+      await saveGesture(updated);
+      await refreshLibrary();
+      toast.success(`Image saved for "${gesture.name}"`);
+    },
+    [refreshLibrary]
+  );
+
   const handleExport = useCallback(async () => {
     await exportGestures();
     toast.success("Gestures exported!");
@@ -290,6 +325,7 @@ export default function GestureLibrary() {
               <AnimatePresence>
                 {customGestures.map((g, i) => {
                   const isEditing = editingGesture === g.id;
+                  const imageInputId = `gesture-img-${g.id}`;
                   return (
                     <motion.div
                       key={g.id}
@@ -337,6 +373,7 @@ export default function GestureLibrary() {
                         </div>
                       ) : (
                         <>
+                          <GestureImageThumb blob={g.imageBlob} label={g.name} />
                           <span className="text-2xl mb-2 block">{g.emoji || "👋"}</span>
                           <h3 className="font-semibold text-foreground font-display text-lg">{g.name}</h3>
                           <p className="mt-1 text-xs text-muted-foreground">
@@ -345,10 +382,26 @@ export default function GestureLibrary() {
                           {!editMode && (
                             <div className="flex items-center gap-1 mt-2">
                               <VoiceRecordButton gestureName={g.name} />
+                              <input
+                                id={imageInputId}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => void attachGestureImage(g, e.target.files?.[0] ?? null)}
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 gap-1 text-xs ml-auto"
+                                onClick={() => document.getElementById(imageInputId)?.click()}
+                              >
+                                <Upload className="h-3 w-3" />
+                                {g.imageBlob ? "Change Image" : "Upload Image"}
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-7 w-7 p-0 ml-auto text-muted-foreground hover:text-destructive"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                                 onClick={() => setDeleteTarget({ id: g.id, name: g.name })}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -406,6 +459,14 @@ export default function GestureLibrary() {
                 <FileUp className="h-5 w-5" />
                 Import
               </Button>
+            </div>
+
+            <div className="mt-8">
+              <GestureImageGrid
+                gestures={customGestures}
+                title="Gesture Learning Section"
+                getLabel={(g) => g.name}
+              />
             </div>
           </div>
         )}
